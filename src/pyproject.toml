@@ -1,0 +1,33 @@
+[project]
+name = "agent-factory"
+version = "0.1.0"
+description = "Host app: loads standardized LangGraph sub-agent packages at runtime"
+readme = "README.md"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "agent-factory-sdk",
+    "agent-chitchat",
+    "agent-calculator",
+    "agent-summarizer",
+    "python-dotenv>=1.0.0",
+]
+
+[dependency-groups]
+dev = [
+    "pytest>=8.0",
+]
+
+[tool.uv]
+package = false
+
+[tool.uv.workspace]
+members = ["packages/*"]
+
+[tool.uv.sources]
+agent-factory-sdk = { workspace = true }
+agent-chitchat = { workspace = true }
+agent-calculator = { workspace = true }
+agent-summarizer = { workspace = true }
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

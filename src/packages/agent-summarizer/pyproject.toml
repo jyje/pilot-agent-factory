@@ -1,0 +1,21 @@
+[project]
+name = "agent-summarizer"
+version = "0.1.0"
+description = "Example sub-agent: two-node summarize-then-keypoints pipeline"
+requires-python = ">=3.14,<3.15"
+dependencies = [
+    "agent-factory-sdk",
+]
+
+[project.entry-points."agent_factory.agents"]
+summarizer = "agent_summarizer:AGENT"
+
+[tool.uv.sources]
+agent-factory-sdk = { workspace = true }
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/agent_summarizer"]
