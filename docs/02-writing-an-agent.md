@@ -112,4 +112,4 @@ Drop-ins may import the SDK and anything in the host venv, but cannot bring thei
 - Always get the model via `resolve_llm(config)` so tests and hosts can inject.
 - `sdk_version` is a literal string, not an import of `SDK_VERSION` — importing the installed version would make the compat gate vacuous.
 - Declare non-default state channels in `input_schema`/`output_schema`.
-- Give `capabilities` real routing value: they become the supervisor's routing prompt in Phase 4.
+- Give `capabilities` real routing value: they are injected verbatim into the supervisor's routing prompt (`agent_factory_sdk.supervisor`), so they directly decide when your agent gets picked.

@@ -112,4 +112,4 @@ def test_replies():
 - 모델은 항상 `resolve_llm(config)`로 얻을 것 — 테스트/호스트가 주입할 수 있도록.
 - `sdk_version`은 `SDK_VERSION` 임포트가 아닌 리터럴 문자열 — 설치된 버전을 임포트하면 호환성 게이트가 무의미해집니다.
 - 기본값 외 state 채널은 `input_schema`/`output_schema`에 선언할 것.
-- `capabilities`에 실질적 라우팅 가치를 담을 것 — Phase 4에서 수퍼바이저 라우팅 프롬프트가 됩니다.
+- `capabilities`에 실질적 라우팅 가치를 담을 것 — 수퍼바이저 라우팅 프롬프트(`agent_factory_sdk.supervisor`)에 그대로 주입되어 에이전트가 선택되는 시점을 직접 결정합니다.

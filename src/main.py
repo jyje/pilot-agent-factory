@@ -3,10 +3,12 @@
 Usage:
     uv run python main.py list
     uv run python main.py run <agent> "<prompt>"
+    uv run python main.py chat "<prompt>"
 
 `list` shows agents from both load modes (installed entry points + dropins/),
-including isolated load failures. `run` builds the chosen agent's graph and
-streams it against the configured endpoint (LM Studio via .env).
+including isolated load failures. `run` builds one chosen agent's graph;
+`chat` assembles ALL loaded agents under the Phase 4 supervisor and lets the
+router decide. Both stream against the configured endpoint (LM Studio via .env).
 """
 
 from __future__ import annotations
@@ -71,21 +73,57 @@ def cmd_run(args: argparse.Namespace) -> int:
         result = chunk
 
     for msg in result.get("messages", []):
-        role = getattr(msg, "type", "?")
-        style = {"human": "👤 Human", "ai": "🤖 AI", "tool": "🔧 Tool"}.get(role, role)
-        print(f"\n{BOLD}{style}{RESET}")
-        content = msg.content
-        if isinstance(content, list):  # Anthropic block format
-            content = "\n".join(
-                b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
-            )
-        if content:
-            print(content)
-        for tc in getattr(msg, "tool_calls", None) or []:
-            print(f"  {YELLOW}⤷ call {tc['name']}({tc['args']}){RESET}")
+        _print_message(msg)
 
     if summary := result.get("summary"):
         print(f"\n{BOLD}📝 summary channel{RESET}\n{summary}")
+    print()
+    return 0
+
+
+def _print_message(msg) -> None:
+    role = getattr(msg, "type", "?")
+    style = {"human": "👤 Human", "ai": "🤖 AI", "tool": "🔧 Tool"}.get(role, role)
+    print(f"\n{BOLD}{style}{RESET}")
+    content = msg.content
+    if isinstance(content, list):  # Anthropic block format
+        content = "\n".join(
+            b.get("text", "") for b in content if isinstance(b, dict) and b.get("type") == "text"
+        )
+    if content:
+        print(content)
+    for tc in getattr(msg, "tool_calls", None) or []:
+        print(f"  {YELLOW}⤷ call {tc['name']}({tc['args']}){RESET}")
+
+
+def cmd_chat(args: argparse.Namespace) -> int:
+    from agent_factory_sdk import build_supervisor
+
+    registry = discover()
+    graph = build_supervisor(registry)
+
+    print(f"\n{BOLD}supervisor{RESET} over {len(registry.agents)} agents: "
+          f"{', '.join(registry.agents)}")
+    print("─" * 72)
+
+    result: dict = {}
+    seen_routes = 0
+    seen_msgs = 1  # skip echoing the user's own message
+    for chunk in graph.stream({"messages": [("user", args.prompt)]}, stream_mode="values"):
+        result = chunk
+        for decision in chunk.get("route_trace", [])[seen_routes:]:
+            print(f"\n{DIM}── supervisor → {BOLD}{decision['next']}{RESET}{DIM}"
+                  f"  ({decision['reason']}) ──{RESET}")
+            seen_routes += 1
+        for msg in chunk.get("messages", [])[seen_msgs:]:
+            _print_message(msg)
+            seen_msgs += 1
+
+    if artifacts := result.get("artifacts"):
+        print(f"\n{BOLD}📦 artifacts{RESET}")
+        for agent_name, extras in artifacts.items():
+            for key, value in extras.items():
+                print(f"  {agent_name}.{key}: {str(value)[:200]}")
     print()
     return 0
 
@@ -100,8 +138,11 @@ def main() -> int:
     run.add_argument("agent", help="agent name (see `list`)")
     run.add_argument("prompt", help="user prompt")
 
+    chat = sub.add_parser("chat", help="run the supervisor over all loaded agents")
+    chat.add_argument("prompt", help="user prompt")
+
     args = parser.parse_args()
-    return {"list": cmd_list, "run": cmd_run}[args.command](args)
+    return {"list": cmd_list, "run": cmd_run, "chat": cmd_chat}[args.command](args)
 
 
 if __name__ == "__main__":
