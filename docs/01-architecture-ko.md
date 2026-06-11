@@ -5,13 +5,14 @@
 ## 4계층 패턴
 
 ```
-1. 계약        agent-factory-sdk: AgentManifest + SubAgent 프로토콜
-2. 패키징      에이전트 = entry point를 가진 pip 패키지
-3. 로딩        AgentRegistry: entry points (모드 A) + 드롭인 파일 (모드 B)
-4. 조립        수퍼바이저가 manifest로 하나의 멀티 에이전트 그래프를 구성
+1. 계약            agent-factory-sdk: AgentManifest + SubAgent 프로토콜
+2. 패키징          에이전트 = entry point를 가진 pip 패키지
+3. 로딩            AgentRegistry: entry points (모드 A) + 드롭인 파일 (모드 B)
+4. 조립            수퍼바이저가 manifest로 하나의 멀티 에이전트 그래프를 구성
+5. 오케스트레이션   최상위 deep agent: task 위임, 세션, 그래프 뷰
 ```
 
-이 저장소는 Phase 1~4를 구현합니다. Phase 5(배포/import)는 [04-phase5-plan-ko.md](04-phase5-plan-ko.md)에 계획되어 있습니다.
+이 저장소는 Phase 1~5를 구현합니다 ([Phase 5 상세](04-phase5-plan-ko.md)). Phase 6(배포/import)은 같은 문서에 계획되어 있습니다.
 
 ## 1계층 — 계약 (`agent_factory_sdk.contract`)
 
@@ -88,6 +89,10 @@ __start__ → supervisor ─┬→ <에이전트 어댑터> ─┐
 - **라우팅은 `route` 툴콜 한 번입니다** (LangChain이 권장하는 tool-calling 핸드오프 스타일). `_parse_decision`은 약한 로컬 모델을 위해 단계적으로 완화됩니다: 툴콜 → 텍스트 내 JSON → 텍스트 내 `FINISH` 리터럴 → 강제 FINISH. 알 수 없는 에이전트명은 FINISH로 강제되고 `route_trace`에 기록됩니다. 라우터는 자신의 라우팅 이력도 봅니다("You already consulted: …" — Anthropic이 비연속 system 메시지를 거부하므로 단일 시스템 메시지에 합쳐서 주입): 실기에서 관찰된 바, 작은 로컬 모델은 이 힌트가 없으면 방금 답한 에이전트로 재라우팅하는 경향이 있습니다.
 - **종료는 프롬프트가 아닌 구조로 보장합니다.** `max_hops`(기본 6)가 LLM 호출 전에 라우터 노드에서 루프를 차단하므로, 혼란에 빠진 로컬 모델이 무한 루프를 돌 수 없습니다.
 - **`route_trace`는 일급 state 채널입니다.** 모든 결정(완화 단계 포함)을 CLI(`main.py chat`), API(SSE `route` 이벤트), 웹앱에서 관찰할 수 있습니다.
+
+## 5계층 — Deep 오케스트레이션 (`agent_factory_sdk.deep`, `viz`)
+
+`build_deep_supervisor(registry, config, checkpointer)`가 수제 라우터를 deepagents 최상위로 대체합니다: 레지스트리 에이전트는 변경 없이 `CompiledSubAgent`로 연결되고(manifest의 `name`/`description` 사용), 파일시스템 툴 표면은 harness profile로 차단되며, 자동 general-purpose 하위 에이전트는 비활성화되어 하위 에이전트 위임이 유일한 작업 경로입니다. 두 수퍼바이저 모두 `checkpointer`를 받아 thread 단위 멀티턴 세션을 지원합니다. `viz.render_platform_mermaid`는 각 에이전트의 컴파일된 그래프 토폴로지에서 플랫폼 Mermaid 그림을 도출합니다. 상세 근거: [04-phase5-plan-ko.md](04-phase5-plan-ko.md).
 
 ## 테스트 하니스 (`agent_factory_sdk.testing`)
 

@@ -1,72 +1,93 @@
-# Phase 5 Plan — Distribution & Import
+# Phase 5 — Deep Agent Orchestration
 
-> [한국어](04-phase5-plan-ko.md) · Status: **planned** (not yet implemented)
+> [한국어](04-phase5-plan-ko.md) · Status: **implemented**
+>
+> Pivot note: Phase 5 was originally scoped as a zip/tar/git import pipeline.
+> That work moved to **Phase 6 (planned)** — see the bottom of this doc.
+> Phase 5 instead puts a [deep agent](https://docs.langchain.com/oss/python/deepagents)
+> at the top of the stack, adds structure visibility, and makes conversations
+> multi-turn.
 
-## Goal
-
-Get an agent from *somewhere else* into a running host without rebuilding it. Two import sources, one convention:
-
-```
-agent-factory import ./agent-translator-0.1.0.zip          # zip / tar.gz archive
-agent-factory import git+https://github.com/me/agent-x.git  # git repo (convention below)
-agent-factory import git+https://...@v0.2.0                 # pinned ref
-```
-
-This matches where the ecosystem is heading in 2026: npm-style one-line installs for agent skills (skills.sh, MCP hubs) and machine-readable capability cards (A2A's `agent.json`). Our `AgentManifest` already plays the card role; Phase 5 adds the install pipeline around it.
-
-## The import convention
-
-An importable unit — whether unpacked from an archive or cloned from git — must be a directory that looks exactly like our example agents:
+## What changed
 
 ```
-agent-x/
-├── pyproject.toml      # REQUIRED: [project.entry-points."agent_factory.agents"]
-│                       #           dependency on agent-factory-sdk (version band)
-├── src/agent_x/
-│   ├── __init__.py     # AGENT (manifest with sdk_version, build())
-│   └── graph.py
-└── tests/              # RECOMMENDED: assert_agent_valid() at minimum
+Phase 4                              Phase 5
+─────────                            ─────────
+hand-rolled router (route tool)  →   deepagents on top (task tool, todos, summarization)
+single-shot conversations        →   sessions via checkpointer (thread_id)
+structure only in code           →   Mermaid graph views in CLI and web
 ```
 
-Validation gate (before any install):
-1. `pyproject.toml` parses and declares exactly one `agent_factory.agents` entry point.
-2. Declared dependencies stay inside the SDK's allowed band (`langgraph`, `langchain-core`, `agent-factory-sdk`) — anything else needs an explicit `--allow-deps` flag.
-3. After install: load through the existing registry (`check_compat` + `assert_agent_valid` with a `ScriptedChatModel`), in a subprocess so a hostile `import` cannot take down the host.
+`build_deep_supervisor(registry, config, checkpointer)` in
+`agent_factory_sdk.deep` assembles the same runtime-loaded agents — unchanged,
+as `CompiledSubAgent`s — under `create_deep_agent`. The Phase 4
+`build_supervisor` remains available (CLI `--simple`, `SUPERVISOR_MODE=simple`).
 
-## Pipeline design
+## 1 · Deep agent on top, filesystem disconnected
 
-```
-archive/git → staging dir → validate → uv pip install --target <agents-site>/<name>@<version>
-            → registry refresh (entry points re-scan) → report (loaded | rejected + reason)
-```
+- Registry agents become deepagents `CompiledSubAgent`s: manifest
+  `description` + `capabilities` become the `task` tool's delegation hints —
+  the same fields the Phase 4 router consumed.
+- A process-wide `HarnessProfile` (registered for the `anthropic` provider,
+  which includes LM Studio behind the Anthropic-compatible endpoint) hides the
+  entire filesystem/sandbox tool surface (`ls`, `read_file`, `write_file`,
+  `edit_file`, `glob`, `grep`, `execute`). deepagents ≥0.6.8 treats
+  `FilesystemMiddleware` as required scaffolding, so disconnection is per-tool
+  rather than middleware removal — functionally identical: the model can never
+  see or call a filesystem tool.
+- The auto-added `general-purpose` subagent is disabled, so **the only path to
+  real work is the registry's sub-agents**.
 
-- **`agent_factory_sdk.importer`** (new module): `import_archive(path)`, `import_git(url, ref)`, both returning the same `LoadReport` shape the loader already uses — failures isolate, never raise.
-- **Versioned install dirs** (`<name>@<version>`) make rollback a directory delete; `sys.path` gets the active version only.
-- **Git mode** is `git clone --depth 1` (+ optional `--ref`); a commit hash in the lockfile (`agents.lock`) makes installs reproducible.
-- **K8s shape** stays the Phase 3 recommendation: an initContainer runs `agent-factory import` against a PVC; the main container restarts to pick it up. No in-process hot reload.
+## 2 · Structure visibility
 
-## Trust model (the hard part)
+| Surface | Command / endpoint | Shows |
+|---|---|---|
+| CLI | `uv run python main.py graph` | platform overview: supervisor + every agent's real internal graph as Mermaid subgraphs |
+| CLI | `main.py graph <agent>` / `--top` | one agent's compiled graph / the deep agent's own runtime graph |
+| API | `GET /api/graph`, `/api/graph/top`, `/api/graph/{name}` | same three scopes as JSON `{scope, mermaid}` |
+| Web | header **Structure** button · click any agent card | Mermaid rendered client-side in a dialog |
 
-Importing an agent is executing someone's code. Defaults are conservative:
+The overview (`render_platform_mermaid`) is generated from each agent's
+*compiled* graph topology, not hand-drawn — an imported agent shows up with
+its actual nodes and edges, no drawing code required.
 
-| Risk | Mitigation |
-|---|---|
-| malicious `import` side effects | validation runs in a subprocess with `--no-network` env; host process never imports unvalidated code |
-| dependency confusion / typosquatting | `--allow-deps` required for anything outside the SDK band; lockfile pins hashes |
-| tampered archives | optional `--sha256` flag; git imports record the resolved commit |
-| privilege of imported agents | same-process model is trusted-by-design — the escape hatch for untrusted agents remains a separate service + A2A, not import |
+![Platform structure dialog](assets/scenario-4-structure.png)
 
-## Example repository
+## 3 · Multi-turn sessions
 
-A public template repo, `jyje/pilot-agent-template`, doubling as the git-import demo target:
+Both supervisors accept a LangGraph `checkpointer`; conversations are keyed by
+`thread_id`:
 
-- the convention above, pre-wired (`cookiecutter`-style placeholders or a `create-agent` script)
-- CI: `uv run pytest` (contract harness) + manifest JSON export as a release artifact (the A2A-style "agent card")
-- a tagged release (`v0.1.0`) so `agent-factory import git+...@v0.1.0` works out of the box
+- **API**: `POST /api/chat` takes `session_id`; the backend holds a
+  `MemorySaver` and streams only what grows past the thread's existing history.
+- **Web**: a session chip + **New session** button; the page keeps one session
+  id per conversation.
+- **CLI**: `main.py chat` without a prompt opens a REPL on a single thread.
 
-## Milestones
+Verified live on LM Studio: turn 1 "My name is Jay" → turn 2 "What is my
+name?" → *"Jay"*, with the model citing the previous turn; then a `task`
+delegation to calculator in the same session.
 
-1. **5a — archive import**: importer module + `import` CLI + tests with fixture zips (good/broken/incompatible).
-2. **5b — git import**: clone + ref pinning + `agents.lock`.
-3. **5c — template repo**: publish `pilot-agent-template`, document the end-to-end demo (`import git+…` → appears in the web app sidebar).
-4. **5d (stretch)** — `GET /api/agents` grows an `agent.json`-compatible export; the backend gains `POST /api/import` guarded behind an admin flag.
+![Multi-turn memory](assets/scenario-5-multiturn.png)
+![Deep delegation via task tool](assets/scenario-6-deep-delegation.png)
+
+## Known limits
+
+- `MemorySaver` is in-process: sessions die with the server. A durable
+  checkpointer (SQLite/Postgres) is a drop-in swap when needed.
+- Small local models are flaky as deep-agent drivers: they sometimes emit
+  empty replies (`[]`) or skip delegation; re-prompting works, and every path
+  degrades safely. Claude-class models do not exhibit this.
+- The deep agent's own runtime graph (`graph --top`) shows the middleware
+  loop, which is faithful but less readable than the platform overview — the
+  overview is the intended default.
+
+## Phase 6 (planned) — distribution & import
+
+The previous Phase 5 plan, deferred intact: import agents from zip/tar
+archives and git repos following the package convention
+(`pyproject.toml` with one `agent_factory.agents` entry point), with a
+validation gate (dependency band, subprocess isolation), versioned install
+dirs, `agents.lock` pinning, and a `jyje/pilot-agent-template` example repo.
+The graph overview from this phase doubles as the import verification view:
+a freshly imported agent should appear there immediately.

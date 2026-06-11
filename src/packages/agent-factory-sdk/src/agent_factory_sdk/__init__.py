@@ -12,6 +12,7 @@ from .loader import (
     load_dropin_agents,
     load_installed_agents,
 )
+from .deep import build_deep_supervisor, to_compiled_subagents
 from .supervisor import (
     FINISH,
     SupervisorState,
@@ -19,6 +20,7 @@ from .supervisor import (
     make_adapter,
     make_router,
 )
+from .viz import render_mermaid, render_platform_mermaid
 
 __version__ = SDK_VERSION
 
@@ -35,8 +37,12 @@ __all__ = [
     "SDK_VERSION",
     "SubAgent",
     "SupervisorState",
+    "build_deep_supervisor",
     "build_supervisor",
     "check_compat",
+    "render_mermaid",
+    "render_platform_mermaid",
+    "to_compiled_subagents",
     "load_dropin_agents",
     "load_installed_agents",
     "make_adapter",

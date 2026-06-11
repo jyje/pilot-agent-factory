@@ -24,8 +24,9 @@ import re
 from typing import Annotated, Any, Callable
 
 from langchain_core.messages import AIMessage, SystemMessage
-from langchain_core.runnables import Runnable
+from langchain_core.runnables import Runnable, RunnableConfig
 from langchain_core.tools import tool
+from langgraph.checkpoint.base import BaseCheckpointSaver
 from langgraph.graph import END, START, MessagesState, StateGraph
 
 from .contract import SubAgent
@@ -115,8 +116,10 @@ def make_adapter(agent: SubAgent, config: dict[str, Any] | None = None) -> Calla
         metadata={"agent_name": manifest.name, "agent_version": manifest.version},
     )
 
-    def node(state: SupervisorState) -> dict[str, Any]:
-        result = sub.invoke({"messages": state["messages"]})
+    def node(state: SupervisorState, config: RunnableConfig) -> dict[str, Any]:
+        # passing the node's config through makes the sub-graph's LLM tokens
+        # surface in the parent's `messages` stream (with our trace metadata)
+        result = sub.invoke({"messages": state["messages"]}, config=config)
         updates: dict[str, Any] = {
             "messages": result["messages"][len(state["messages"]):],
             "hops": state.get("hops", 0) + 1,
@@ -170,8 +173,13 @@ def build_supervisor(
     registry: AgentRegistry,
     config: dict[str, Any] | None = None,
     max_hops: int = DEFAULT_MAX_HOPS,
+    checkpointer: BaseCheckpointSaver | None = None,
 ) -> Runnable:
-    """Assemble the loaded agents into one supervised multi-agent graph."""
+    """Assemble the loaded agents into one supervised multi-agent graph.
+
+    `checkpointer` enables multi-turn sessions keyed by
+    `config={"configurable": {"thread_id": ...}}` at invoke time.
+    """
     if not registry.agents:
         raise ValueError("registry has no loaded agents — nothing to supervise")
 
@@ -188,4 +196,4 @@ def build_supervisor(
         lambda state: state["next"],
         {name: name for name in registry.agents} | {FINISH: END},
     )
-    return builder.compile()
+    return builder.compile(checkpointer=checkpointer)

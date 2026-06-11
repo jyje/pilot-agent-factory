@@ -5,13 +5,14 @@
 ## The 4-layer pattern
 
 ```
-1. Contract     agent-factory-sdk: AgentManifest + SubAgent protocol
-2. Packaging    each agent = a pip package with an entry point
-3. Loading      AgentRegistry: entry points (A) + drop-in files (B)
-4. Assembly     supervisor builds one multi-agent graph from manifests
+1. Contract        agent-factory-sdk: AgentManifest + SubAgent protocol
+2. Packaging       each agent = a pip package with an entry point
+3. Loading         AgentRegistry: entry points (A) + drop-in files (B)
+4. Assembly        supervisor builds one multi-agent graph from manifests
+5. Orchestration   deep agent on top: task delegation, sessions, graph views
 ```
 
-This repository implements phases 1–4. Phase 5 (distribution/import) is planned in [04-phase5-plan.md](04-phase5-plan.md).
+This repository implements phases 1–5 ([Phase 5 details](04-phase5-plan.md)); Phase 6 (distribution/import) is planned in the same doc.
 
 ## Layer 1 — Contract (`agent_factory_sdk.contract`)
 
@@ -88,6 +89,10 @@ Design decisions:
 - **Routing is one `route` tool call** (the tool-calling handoff style LangChain recommends). `_parse_decision` degrades gracefully for weak local models: tool call → JSON-in-text → a literal `FINISH` in text → forced FINISH. Unknown agent names are coerced to FINISH and recorded in `route_trace`. The router also sees its own routing history ("You already consulted: …", folded into the single system message — Anthropic rejects non-consecutive system messages): observed live, small local models re-route to the agent that just replied unless reminded their request may already be answered.
 - **Termination is structural, not prompt-based.** `max_hops` (default 6) cuts the loop in the router node before any LLM call, so a confused local model cannot spin forever.
 - **`route_trace` is a first-class state channel.** Every decision (including degradations) is observable by the CLI (`main.py chat`), the API (SSE `route` events), and the web app.
+
+## Layer 5 — Deep orchestration (`agent_factory_sdk.deep`, `viz`)
+
+`build_deep_supervisor(registry, config, checkpointer)` replaces the hand-rolled router with a deepagents top: registry agents plug in unchanged as `CompiledSubAgent`s (`name`/`description` from the manifest), the filesystem tool surface is disconnected via a harness profile, and the auto general-purpose subagent is disabled so sub-agent delegation is the only work path. Both supervisors accept a `checkpointer` for thread-keyed multi-turn sessions. `viz.render_platform_mermaid` derives the platform's Mermaid picture from each agent's compiled graph topology. Full rationale: [04-phase5-plan.md](04-phase5-plan.md).
 
 ## Test harness (`agent_factory_sdk.testing`)
 

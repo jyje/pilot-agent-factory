@@ -22,9 +22,9 @@
 A pattern for developing LangGraph sub-agents as **standardized plugin packages** and loading them at runtime — without the host knowing them at build time.
 
 ```
-Contract (SDK)  →  Packaging (entry points)  →  Runtime loading  →  Supervisor assembly
-   Phase 1            Phase 2                      Phase 3            Phase 4
-                                                          Phase 5 (planned): zip/tar/git import
+Contract (SDK) → Packaging (entry points) → Runtime loading → Supervisor → Deep orchestration
+   Phase 1           Phase 2                   Phase 3         Phase 4       Phase 5
+                                                     Phase 6 (planned): zip/tar/git import
 ```
 
 Every sub-agent is a pip package that exposes a `manifest` (metadata + routing hints) and a `build()` factory returning a compiled `StateGraph`. The host discovers agents through two modes:
@@ -32,7 +32,7 @@ Every sub-agent is a pip package that exposes a `manifest` (metadata + routing h
 - **Mode A — entry points**: pip-installed packages registered under the `agent_factory.agents` group (default)
 - **Mode B — drop-ins**: plain `.py` files imported from a directory at runtime (the local stand-in for a mounted PVC/ConfigMap)
 
-One broken agent never blocks the host: load failures are isolated and reported per source. The Phase 4 supervisor then assembles whatever loaded into one multi-agent graph — `capabilities` drive the routing prompt, `output_schema` drives state mapping, `name@version` drives trace tags.
+One broken agent never blocks the host: load failures are isolated and reported per source. A **deep agent** sits on top (Phase 5) — it plans, delegates to the loaded agents through the `task` tool (filesystem disconnected, sub-agent routing only), and keeps **multi-turn sessions** via a checkpointer. The platform's structure is visible as **Mermaid graph views** in both CLI and web.
 
 ```
         host (main.py chat · app/backend · web app)
@@ -44,7 +44,9 @@ One broken agent never blocks the host: load failures are isolated and reported 
     agent-summarizer        │
             └────────────┬──┘
                          ▼
-   supervisor ⇄ adapters over SubAgent.build(config)
+      deep supervisor (task tool) over CompiledSubAgents
+        · sessions: thread_id × checkpointer
+        · structure: /api/graph · main.py graph
 ```
 
 ![Agent Factory web app](docs/assets/webapp-calculator.png)
@@ -71,11 +73,31 @@ The **pirate** agent was never pip-installed — it's a single file in `dropins/
 
 ![Scenario 3 — pirate drop-in](docs/assets/scenario-3-pirate.png)
 
+### 4 · Platform structure view (Phase 5)
+
+The header's **Structure** button (or `main.py graph`) renders the live topology: the deep supervisor connected by `task` edges to every loaded agent's *actual* compiled graph — calculator's ReAct loop, summarizer's two-node pipeline. Generated from the registry, so an imported agent appears with zero drawing code.
+
+![Scenario 4 — structure dialog](docs/assets/scenario-4-structure.png)
+
+### 5 · Multi-turn session memory (Phase 5)
+
+Turn 1: *"My name is Jay."* Turn 2: *"What is my name?"* → **"Jay"**, the model citing the previous turn — conversation state lives server-side in a checkpointer keyed by the session chip's `thread_id`. Then, in the same session, the deep agent delegates a calculation via the `task` tool.
+
+![Scenario 5 — multi-turn memory](docs/assets/scenario-5-multiturn.png)
+![Scenario 6 — deep delegation](docs/assets/scenario-6-deep-delegation.png)
+
+### 6 · Token streaming with per-agent attribution
+
+Every LLM token streams live over SSE, attributed to its producer: each bubble carries an **agent badge**, the footer shows **who is working right now**, and tool chips flip Running → Completed. Model thinking streams inside an **open Reasoning fold** ("Thinking…", first capture) that **auto-collapses into "Thought for N seconds"** when the stream ends (second capture).
+
+![Scenario 7 — live streaming](docs/assets/scenario-7-streaming-live.png)
+![Scenario 8 — reasoning fold](docs/assets/scenario-8-reasoning-fold.png)
+
 ## What's inside
 
 | Component | Role |
 |---------|------|
-| `src/packages/agent-factory-sdk` | Contract (`AgentManifest`, `SubAgent`), semver compat gate, loader/registry, **supervisor assembly**, test harness |
+| `src/packages/agent-factory-sdk` | Contract (`AgentManifest`, `SubAgent`), semver compat gate, loader/registry, supervisor assembly, **deep orchestration + graph rendering**, test harness |
 | `src/packages/agent-chitchat` | Example 1 — single-node conversational graph |
 | `src/packages/agent-calculator` | Example 2 — ReAct tool loop (add/subtract/multiply/divide) |
 | `src/packages/agent-summarizer` | Example 3 — two-node pipeline with a custom `summary` state channel |
@@ -100,11 +122,13 @@ uv run python doctor.py
 # list discovered agents (3 installed + 1 drop-in)
 uv run python main.py list
 
-# run one agent directly, or let the supervisor route
+# run one agent directly, or let the deep supervisor delegate
 uv run python main.py run calculator "What is (17 + 25) * 3?"
 uv run python main.py chat "What is (17 + 25) * 3?"
+uv run python main.py chat            # multi-turn REPL (session memory)
+uv run python main.py graph           # Mermaid platform structure
 
-# LLM-free test suite (contract + loader + agents + supervisor)
+# LLM-free test suite (contract + loader + agents + supervisors)
 uv run pytest
 ```
 

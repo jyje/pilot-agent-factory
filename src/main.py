@@ -3,12 +3,15 @@
 Usage:
     uv run python main.py list
     uv run python main.py run <agent> "<prompt>"
-    uv run python main.py chat "<prompt>"
+    uv run python main.py chat ["<prompt>"] [--simple]
+    uv run python main.py graph [<agent>] [--top]
 
 `list` shows agents from both load modes (installed entry points + dropins/),
-including isolated load failures. `run` builds one chosen agent's graph;
-`chat` assembles ALL loaded agents under the Phase 4 supervisor and lets the
-router decide. Both stream against the configured endpoint (LM Studio via .env).
+including isolated load failures. `run` builds one chosen agent's graph.
+`chat` assembles ALL loaded agents under the Phase 5 deep supervisor
+(`--simple` falls back to the Phase 4 router); without a prompt it opens a
+multi-turn REPL backed by an in-memory checkpointer. `graph` prints Mermaid:
+the platform overview by default, one agent's graph, or the top-level graph.
 """
 
 from __future__ import annotations
@@ -97,34 +100,78 @@ def _print_message(msg) -> None:
 
 
 def cmd_chat(args: argparse.Namespace) -> int:
-    from agent_factory_sdk import build_supervisor
+    from agent_factory_sdk import build_deep_supervisor, build_supervisor
+    from langgraph.checkpoint.memory import MemorySaver
 
     registry = discover()
-    graph = build_supervisor(registry)
+    build = build_supervisor if args.simple else build_deep_supervisor
+    graph = build(registry, checkpointer=MemorySaver())
+    session = {"configurable": {"thread_id": "cli"}}
 
-    print(f"\n{BOLD}supervisor{RESET} over {len(registry.agents)} agents: "
+    mode = "supervisor (simple)" if args.simple else "deep supervisor"
+    print(f"\n{BOLD}{mode}{RESET} over {len(registry.agents)} agents: "
           f"{', '.join(registry.agents)}")
     print("─" * 72)
 
-    result: dict = {}
-    seen_routes = 0
-    seen_msgs = 1  # skip echoing the user's own message
-    for chunk in graph.stream({"messages": [("user", args.prompt)]}, stream_mode="values"):
-        result = chunk
-        for decision in chunk.get("route_trace", [])[seen_routes:]:
-            print(f"\n{DIM}── supervisor → {BOLD}{decision['next']}{RESET}{DIM}"
-                  f"  ({decision['reason']}) ──{RESET}")
-            seen_routes += 1
-        for msg in chunk.get("messages", [])[seen_msgs:]:
-            _print_message(msg)
-            seen_msgs += 1
+    seen = {"routes": 0, "msgs": 0}
 
-    if artifacts := result.get("artifacts"):
-        print(f"\n{BOLD}📦 artifacts{RESET}")
-        for agent_name, extras in artifacts.items():
-            for key, value in extras.items():
-                print(f"  {agent_name}.{key}: {str(value)[:200]}")
-    print()
+    def run_turn(prompt: str) -> None:
+        seen["msgs"] += 1  # skip echoing the user's own message
+        result: dict = {}
+        for chunk in graph.stream(
+            {"messages": [("user", prompt)]}, config=session, stream_mode="values"
+        ):
+            result = chunk
+            for decision in chunk.get("route_trace", [])[seen["routes"]:]:
+                print(f"\n{DIM}── supervisor → {BOLD}{decision['next']}{RESET}{DIM}"
+                      f"  ({decision['reason']}) ──{RESET}")
+                seen["routes"] += 1
+            for msg in chunk.get("messages", [])[seen["msgs"]:]:
+                _print_message(msg)
+                seen["msgs"] += 1
+        if artifacts := result.get("artifacts"):
+            print(f"\n{BOLD}📦 artifacts{RESET}")
+            for agent_name, extras in artifacts.items():
+                for key, value in extras.items():
+                    print(f"  {agent_name}.{key}: {str(value)[:200]}")
+
+    if args.prompt:
+        run_turn(args.prompt)
+        print()
+        return 0
+
+    print(f"{DIM}multi-turn session (thread: cli) — exit/quit/Ctrl-D to leave{RESET}")
+    while True:
+        try:
+            prompt = input(f"\n{BOLD}you>{RESET} ").strip()
+        except (EOFError, KeyboardInterrupt):
+            print()
+            break
+        if prompt.lower() in {"exit", "quit"}:
+            break
+        if prompt:
+            run_turn(prompt)
+    return 0
+
+
+def cmd_graph(args: argparse.Namespace) -> int:
+    from agent_factory_sdk import (
+        build_deep_supervisor,
+        render_mermaid,
+        render_platform_mermaid,
+    )
+
+    registry = discover()
+    if args.agent:
+        try:
+            print(render_mermaid(registry.get(args.agent).build()))
+        except KeyError as e:
+            print(f"{RED}error:{RESET} {e}", file=sys.stderr)
+            return 1
+    elif args.top:
+        print(render_mermaid(build_deep_supervisor(registry)))
+    else:
+        print(render_platform_mermaid(registry))
     return 0
 
 
@@ -138,11 +185,20 @@ def main() -> int:
     run.add_argument("agent", help="agent name (see `list`)")
     run.add_argument("prompt", help="user prompt")
 
-    chat = sub.add_parser("chat", help="run the supervisor over all loaded agents")
-    chat.add_argument("prompt", help="user prompt")
+    chat = sub.add_parser("chat", help="run the deep supervisor over all loaded agents")
+    chat.add_argument("prompt", nargs="?", help="user prompt (omit for a multi-turn REPL)")
+    chat.add_argument("--simple", action="store_true",
+                      help="use the Phase 4 router instead of the deep agent")
+
+    graph = sub.add_parser("graph", help="print Mermaid graph structure")
+    graph.add_argument("agent", nargs="?", help="agent name for a single agent's graph")
+    graph.add_argument("--top", action="store_true",
+                       help="show the top-level deep agent graph instead of the overview")
 
     args = parser.parse_args()
-    return {"list": cmd_list, "run": cmd_run, "chat": cmd_chat}[args.command](args)
+    return {"list": cmd_list, "run": cmd_run, "chat": cmd_chat, "graph": cmd_graph}[
+        args.command
+    ](args)
 
 
 if __name__ == "__main__":

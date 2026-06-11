@@ -1,18 +1,20 @@
 # AGENTS.md — Project Context for AI Agents
 
-> Updated: 2026-06-11
+> Updated: 2026-06-12
 
 ## 프로젝트 목적
 
 LangGraph 하위 에이전트를 표준화된 플러그인 패키지로 개발하고 런타임에 불러오는 패턴의 파일럿.
-계약(Phase 1) → 패키징(Phase 2) → 런타임 로딩(Phase 3) → 수퍼바이저 조립(Phase 4)을 구현했고,
-배포/import 파이프라인(Phase 5)은 [docs/04-phase5-plan-ko.md](docs/04-phase5-plan-ko.md)에 계획되어 있다.
+계약(Phase 1) → 패키징(Phase 2) → 런타임 로딩(Phase 3) → 수퍼바이저 조립(Phase 4) →
+deep agent 오케스트레이션(Phase 5: 최상위 deepagents, 그래프 뷰, 멀티턴 세션)을 구현했고,
+배포/import 파이프라인(Phase 6)은 [docs/04-phase5-plan-ko.md](docs/04-phase5-plan-ko.md)에 계획되어 있다.
 자매 파일럿: [pilot-deepagents-rubrics](https://github.com/jyje/pilot-deepagents-rubrics).
 
-## 현재 상태 (2026-06-11)
+## 현재 상태 (2026-06-12)
 
-Phase 1~4 완료. 테스트 35개 통과. LM Studio(`google/gemma-4-e4b`)로 supervisor CLI/웹앱 실기 검증
-(calculator 2단계 툴 루프 라우팅, 스크린샷: docs/assets/webapp-calculator.png).
+Phase 1~5 완료. 테스트 41개 통과. LM Studio(`google/gemma-4-e4b`)로 실기 검증:
+deep supervisor의 task 위임, 멀티턴 세션 메모리("Jay" 회상), 플랫폼 구조 다이얼로그
+(스크린샷: docs/assets/scenario-4~6).
 
 ## 프로젝트 구조
 
@@ -28,12 +30,12 @@ pilot-agent-factory/
 │   ├── 04-phase5-plan(-ko).md        ← Phase 5 계획: zip/tar/git import
 │   └── assets/                       ← 스크린샷
 ├── src/                              ← 플랫폼: uv workspace
-│   ├── main.py                       ← 호스트 CLI: list / run / chat(수퍼바이저)
+│   ├── main.py                       ← 호스트 CLI: list / run / chat(REPL) / graph
 │   ├── doctor.py                     ← 진단: ENV/연결/탐색/추론
 │   ├── dropins/agent_pirate.py       ← 모드 B 드롭인 데모
-│   ├── tests/                        ← 계약/로더/에이전트/수퍼바이저 (LLM 불필요)
+│   ├── tests/                        ← 계약/로더/에이전트/수퍼바이저/deep (LLM 불필요)
 │   └── packages/
-│       ├── agent-factory-sdk/        ← contract, compat, loader, supervisor, llm, testing
+│       ├── agent-factory-sdk/        ← contract, compat, loader, supervisor, deep, viz, llm, testing
 │       ├── agent-chitchat/           ← 예시 1: 단일 노드
 │       ├── agent-calculator/         ← 예시 2: ReAct 툴 루프
 │       └── agent-summarizer/         ← 예시 3: 2노드 + 커스텀 state 채널
@@ -49,9 +51,11 @@ pilot-agent-factory/
 cd src/
 cp .env.sample .env        # 기본값이 LM Studio (127.0.0.1:1234)
 uv sync --dev
-uv run pytest              # LLM 없이 전체 검증 (35 tests)
+uv run pytest              # LLM 없이 전체 검증 (41 tests)
 uv run python doctor.py
-uv run python main.py chat "What is (17 + 25) * 3?"   # 수퍼바이저 라우팅
+uv run python main.py chat "What is (17 + 25) * 3?"   # deep supervisor 위임 (--simple: Phase 4 라우터)
+uv run python main.py chat                            # 멀티턴 REPL (세션 메모리)
+uv run python main.py graph                           # Mermaid 플랫폼 구조
 
 # 웹앱 (app/)
 cd app/backend && uv sync && uv run fastapi dev src/agent_factory_backend/server.py
@@ -67,8 +71,11 @@ LM Studio: `lms server start` 후 `lms load google/gemma-4-e4b --context-length 
 - 에이전트의 `sdk_version`은 리터럴 문자열 (SDK_VERSION 임포트 금지)
 - 로더는 실패 격리: 깨진 에이전트는 `LoadReport.errors`로 기록, 예외 전파 금지
 - entry point 그룹명: `agent_factory.agents`, 드롭인 컨벤션: 모듈 레벨 `AGENT`
-- 수퍼바이저: `route` 툴콜 1회로 라우팅, `_parse_decision`은 단계적 완화(툴콜→JSON→FINISH 리터럴→강제 FINISH),
+- 수퍼바이저(Phase 4): `route` 툴콜 1회로 라우팅, `_parse_decision`은 단계적 완화(툴콜→JSON→FINISH 리터럴→강제 FINISH),
   `max_hops`(기본 6)로 구조적 종료, 어댑터가 messages만 전달하고 extras는 `artifacts[<agent>]`로 승격
+- deep supervisor(Phase 5, 기본): deepagents `CompiledSubAgent`로 하위 연결, `anthropic` 프로바이더에
+  HarnessProfile 등록으로 파일시스템 툴 전체 차단(미들웨어 제거는 0.6.8부터 금지) + general-purpose 비활성화.
+  세션은 checkpointer × thread_id (백엔드/CLI REPL 모두 MemorySaver — 인프로세스)
 - 프론트엔드: AI Elements + shadcn만 사용, 도메인 래핑은 `app/frontend/src/components/custom/`에만.
   AI Elements는 vendored — Base UI/Radix 차이 패치가 주석으로 표시되어 있음 (docs/03-webapp.md 참조)
 

@@ -10,10 +10,21 @@ import {
 } from "@/components/ui/card";
 import type { AgentManifest, LoadError } from "@/lib/api";
 
-/** Custom wrapper: renders one AgentManifest with shadcn Card/Badge. */
-export function AgentCard({ manifest }: { manifest: AgentManifest }) {
+/** Custom wrapper: renders one AgentManifest with shadcn Card/Badge.
+ *  Clicking the card opens its graph structure (when onShowGraph is given). */
+export function AgentCard({
+  manifest,
+  onShowGraph,
+}: {
+  manifest: AgentManifest;
+  onShowGraph?: () => void;
+}) {
   return (
-    <Card className="gap-2 py-4">
+    <Card
+      className={`gap-2 py-4 ${onShowGraph ? "cursor-pointer transition-colors hover:bg-accent/50" : ""}`}
+      onClick={onShowGraph}
+      title={onShowGraph ? "Show graph structure" : undefined}
+    >
       <CardHeader className="px-4">
         <CardTitle className="flex items-center gap-2 text-sm">
           <span className="size-2 rounded-full bg-green-500" />

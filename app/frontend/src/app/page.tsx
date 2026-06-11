@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { FactoryIcon } from "lucide-react";
+import { FactoryIcon, NetworkIcon, RotateCcwIcon } from "lucide-react";
 
 import {
   Conversation,
@@ -10,11 +10,6 @@ import {
   ConversationScrollButton,
 } from "@/components/ai-elements/conversation";
 import {
-  Message,
-  MessageContent,
-  MessageResponse,
-} from "@/components/ai-elements/message";
-import {
   PromptInput,
   PromptInputBody,
   PromptInputFooter,
@@ -22,10 +17,16 @@ import {
   PromptInputTextarea,
   type PromptInputMessage,
 } from "@/components/ai-elements/prompt-input";
+import { ActiveAgentIndicator } from "@/components/custom/active-agent";
 import { AgentCard, LoadErrorCard } from "@/components/custom/agent-card";
 import { ArtifactsCard } from "@/components/custom/artifacts-card";
+import { ChatMessage } from "@/components/custom/chat-message";
+import { GraphDialog } from "@/components/custom/graph-view";
+import { NoticeCard } from "@/components/custom/notice-card";
 import { RouteStep } from "@/components/custom/route-step";
 import { ToolCall } from "@/components/custom/tool-call";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
 import { ScrollArea } from "@/components/ui/scroll-area";
 import { Separator } from "@/components/ui/separator";
 import { useSupervisorChat } from "@/hooks/use-supervisor-chat";
@@ -34,7 +35,19 @@ import { fetchAgents, type AgentsResponse } from "@/lib/api";
 export default function Home() {
   const [agents, setAgents] = useState<AgentsResponse | null>(null);
   const [agentsError, setAgentsError] = useState<string | null>(null);
-  const { timeline, artifacts, status, error, send, stop } = useSupervisorChat();
+  const [graphScope, setGraphScope] = useState<string | null>(null);
+  const {
+    timeline,
+    artifacts,
+    status,
+    error,
+    activeAgent,
+    send,
+    stop,
+    retry,
+    sessionId,
+    newSession,
+  } = useSupervisorChat();
 
   useEffect(() => {
     fetchAgents().then(setAgents).catch((e) => setAgentsError(String(e)));
@@ -52,9 +65,22 @@ export default function Home() {
         <FactoryIcon className="size-5" />
         <h1 className="font-semibold text-sm">Agent Factory</h1>
         <span className="text-muted-foreground text-xs">
-          supervisor over runtime-loaded sub-agents
+          deep supervisor over runtime-loaded sub-agents
         </span>
+        <div className="ml-auto flex items-center gap-2">
+          <Badge variant="outline" className="font-mono text-xs">
+            session {sessionId || "…"}
+          </Badge>
+          <Button size="sm" variant="ghost" onClick={newSession}>
+            <RotateCcwIcon className="size-4" /> New session
+          </Button>
+          <Button size="sm" variant="outline" onClick={() => setGraphScope("")}>
+            <NetworkIcon className="size-4" /> Structure
+          </Button>
+        </div>
       </header>
+
+      <GraphDialog scope={graphScope} onClose={() => setGraphScope(null)} />
 
       <div className="flex min-h-0 flex-1">
         <aside className="w-72 shrink-0 border-r">
@@ -69,7 +95,7 @@ export default function Home() {
                 </p>
               )}
               {agents?.agents.map((m) => (
-                <AgentCard key={m.name} manifest={m} />
+                <AgentCard key={m.name} manifest={m} onShowGraph={() => setGraphScope(m.name)} />
               ))}
               {agents && agents.errors.length > 0 && (
                 <>
@@ -98,13 +124,9 @@ export default function Home() {
               {timeline.map((item, i) => {
                 if (item.kind === "route") return <RouteStep key={i} decision={item} />;
                 if (item.kind === "tool") return <ToolCall key={i} item={item} />;
-                return (
-                  <Message key={i} from={item.role === "human" ? "user" : "assistant"}>
-                    <MessageContent>
-                      <MessageResponse>{item.content}</MessageResponse>
-                    </MessageContent>
-                  </Message>
-                );
+                if (item.kind === "notice")
+                  return <NoticeCard key={i} detail={item.detail} onRetry={retry} />;
+                return <ChatMessage key={i} item={item} />;
               })}
               <ArtifactsCard artifacts={artifacts} />
               {error && <p className="text-destructive text-xs">{error}</p>}
@@ -113,6 +135,7 @@ export default function Home() {
           </Conversation>
 
           <div className="mx-auto w-full max-w-3xl p-3">
+            <ActiveAgentIndicator agent={status === "streaming" ? activeAgent : null} />
             <PromptInput onSubmit={handleSubmit}>
               <PromptInputBody>
                 <PromptInputTextarea placeholder="Ask anything — the supervisor routes it" />

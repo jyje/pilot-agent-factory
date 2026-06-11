@@ -9,6 +9,7 @@ dependencies = [
     "langchain-core>=0.3",
     "langchain-anthropic>=0.3",
     "pydantic>=2.7",
+    "deepagents>=0.6.7,<0.7",
 ]
 
 [build-system]
