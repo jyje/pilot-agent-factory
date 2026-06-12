@@ -19,6 +19,7 @@ cd app/backend
 uv sync
 uv run fastapi dev src/agent_factory_backend/server.py    # dev, auto-reload
 # or: uv run uvicorn agent_factory_backend.server:app --port 8000
+# or: ./dev.sh   — frees port 8000 first if a previous run is still bound to it
 ```
 
 | Endpoint | Description |
@@ -55,10 +56,10 @@ pnpm dev        # http://localhost:3000 (expects backend on :8000)
 
 Component policy (per project convention):
 
-- **AI Elements** for all conversational UI: `Conversation`, `Message`/`MessageResponse`, `PromptInput`, `Tool`, `ChainOfThought`, `Reasoning` (thinking fold — streams open, auto-collapses to "Thought for N seconds" when the stream ends).
+- **AI Elements** for all conversational UI: `Conversation`, `Message`/`MessageResponse`, `PromptInput`, `Tool`, `ChainOfThought`, `Reasoning` (thinking fold — streams open, auto-collapses to "Thought for N seconds" when the stream ends), `Shimmer` (animated loading text on everything that's "working": the in-conversation Thinking… placeholder, the running delegation card title, the active-agent indicator).
 - **shadcn/ui** for everything else: `Card`, `Badge`, `Separator`, `ScrollArea`.
-- **`src/components/custom/`** wraps the two when our domain needs a shape they don't ship: `AgentCard`/`LoadErrorCard` (manifest + Phase 3 failures), `RouteStep` (supervisor decisions on ChainOfThought), `ToolCall` (our SSE tool events on the Tool part shape), `ArtifactsCard` (lifted state channels), `GraphDialog`/`MermaidDiagram` (graph structure rendered with the `mermaid` package — header **Structure** button or any agent card), `ChatMessage` (agent badge + reasoning fold + streaming pulse per bubble), `ActiveAgentIndicator` (who is generating right now), `NoticeCard` (empty-reply notice with one-click retry).
-- `src/hooks/use-supervisor-chat.ts` parses the backend's SSE into a renderable timeline: `token` events accumulate into per-agent live bubbles, finalizing `message` events swap in the cleaned content + reasoning, tool calls pair with their results, and sub-agent bubbles (which never get a top-level finalizer) settle via the client-side reasoning splitter on agent handover or `done`.
+- **`src/components/custom/`** wraps the two when our domain needs a shape they don't ship: `AgentCard`/`LoadErrorCard` (manifest + Phase 3 failures), `RouteStep` (supervisor decisions on ChainOfThought), `ToolCall` (a delegation card for our SSE tool events — deep-mode `task` calls are labeled as what they are, "agent → calculator", nest the sub-agent's live bubbles inside as "Delegated work" so the transcript stays chronological, and auto-collapse once the result lands), `ArtifactsCard` (lifted state channels), `GraphDialog`/`MermaidDiagram` (graph structure rendered with the `mermaid` package — header **Structure** button or any agent card), `ChatMessage` (agent badge + reasoning fold + streaming pulse per bubble), `ActiveAgentIndicator` (who is generating right now), `ThinkingShimmer` (in-conversation shimmer placeholder for the silent stretches of a turn — before the first token or between agent handovers), `NoticeCard` (empty-reply notice with one-click retry).
+- `src/hooks/use-supervisor-chat.ts` parses the backend's SSE into a renderable timeline: `token` events accumulate into per-agent live bubbles — nested *inside* the pending `task` card while a delegation runs, top-level otherwise — finalizing `message` events swap in the cleaned content + reasoning, tool results attach to their card and settle its nested bubbles, and anything still streaming settles via the client-side reasoning splitter on agent handover or `done`.
 
 `NEXT_PUBLIC_API_BASE` overrides the backend address (default `http://127.0.0.1:8000`).
 

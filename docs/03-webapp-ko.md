@@ -19,6 +19,7 @@ cd app/backend
 uv sync
 uv run fastapi dev src/agent_factory_backend/server.py    # 개발용, 자동 리로드
 # 또는: uv run uvicorn agent_factory_backend.server:app --port 8000
+# 또는: ./dev.sh   — 이전 실행이 8000 포트를 점유 중이면 먼저 정리
 ```
 
 | 엔드포인트 | 설명 |
@@ -55,10 +56,10 @@ pnpm dev        # http://localhost:3000 (백엔드 :8000 필요)
 
 컴포넌트 정책 (프로젝트 컨벤션):
 
-- **AI Elements**: 모든 대화형 UI — `Conversation`, `Message`/`MessageResponse`, `PromptInput`, `Tool`, `ChainOfThought`, `Reasoning`(사고과정 폴드 — 스트리밍 중 열려 있다가 스트림이 끝나면 "Thought for N seconds"로 자동 접힘).
+- **AI Elements**: 모든 대화형 UI — `Conversation`, `Message`/`MessageResponse`, `PromptInput`, `Tool`, `ChainOfThought`, `Reasoning`(사고과정 폴드 — 스트리밍 중 열려 있다가 스트림이 끝나면 "Thought for N seconds"로 자동 접힘), `Shimmer`("작업 중"인 모든 곳의 애니메이션 로딩 텍스트: 대화 내 Thinking… 플레이스홀더, 실행 중인 위임 카드 제목, 활성 에이전트 인디케이터).
 - **shadcn/ui**: 그 외 전부 — `Card`, `Badge`, `Separator`, `ScrollArea`.
-- **`src/components/custom/`**: 우리 도메인에 필요한 형태가 없을 때 위 둘을 래핑 — `AgentCard`/`LoadErrorCard`(manifest + Phase 3 실패), `RouteStep`(ChainOfThought 위의 수퍼바이저 결정), `ToolCall`(SSE 툴 이벤트의 Tool part 매핑), `ArtifactsCard`(승격된 state 채널), `GraphDialog`/`MermaidDiagram`(`mermaid` 패키지로 그래프 구조 렌더링 — 헤더 **Structure** 버튼 또는 에이전트 카드 클릭), `ChatMessage`(버블별 에이전트 배지 + reasoning 폴드 + 스트리밍 펄스), `ActiveAgentIndicator`(지금 생성 중인 에이전트), `NoticeCard`(빈 응답 알림 + 원클릭 재시도).
-- `src/hooks/use-supervisor-chat.ts`: 백엔드 SSE를 렌더링 가능한 타임라인으로 파싱합니다 — `token` 이벤트는 에이전트별 라이브 버블에 누적되고, 파이널라이즈 `message` 이벤트가 정리된 본문 + reasoning으로 교체하며, 툴콜은 결과와 쌍을 이루고, (최상위 파이널라이저가 없는) 하위 에이전트 버블은 에이전트 교대 또는 `done` 시점에 클라이언트 reasoning 분리기로 정리됩니다.
+- **`src/components/custom/`**: 우리 도메인에 필요한 형태가 없을 때 위 둘을 래핑 — `AgentCard`/`LoadErrorCard`(manifest + Phase 3 실패), `RouteStep`(ChainOfThought 위의 수퍼바이저 결정), `ToolCall`(SSE 툴 이벤트의 위임 카드 — deep 모드 `task` 호출은 실체대로 "agent → calculator"로 표기, 하위 에이전트의 라이브 버블을 "Delegated work"로 카드 안에 중첩해 대화 흐름을 시간순으로 유지, 결과 도착 시 자동 접힘), `ArtifactsCard`(승격된 state 채널), `GraphDialog`/`MermaidDiagram`(`mermaid` 패키지로 그래프 구조 렌더링 — 헤더 **Structure** 버튼 또는 에이전트 카드 클릭), `ChatMessage`(버블별 에이전트 배지 + reasoning 폴드 + 스트리밍 펄스), `ActiveAgentIndicator`(지금 생성 중인 에이전트), `ThinkingShimmer`(턴의 침묵 구간 — 첫 토큰 이전이나 에이전트 교대 사이 — 에 표시되는 대화 내 shimmer 플레이스홀더), `NoticeCard`(빈 응답 알림 + 원클릭 재시도).
+- `src/hooks/use-supervisor-chat.ts`: 백엔드 SSE를 렌더링 가능한 타임라인으로 파싱합니다 — `token` 이벤트는 에이전트별 라이브 버블에 누적되고(위임이 진행 중이면 해당 `task` 카드 *안에* 중첩, 아니면 최상위), 파이널라이즈 `message` 이벤트가 정리된 본문 + reasoning으로 교체하며, 툴 결과는 자기 카드에 붙으면서 중첩 버블을 정리하고, 남은 스트리밍 버블은 에이전트 교대 또는 `done` 시점에 클라이언트 reasoning 분리기로 정리됩니다.
 
 `NEXT_PUBLIC_API_BASE`로 백엔드 주소 변경 가능 (기본 `http://127.0.0.1:8000`).
 

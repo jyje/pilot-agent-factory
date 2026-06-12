@@ -16,10 +16,11 @@ import { splitStreamingReasoning } from "@/lib/reasoning";
 
 /** Custom wrapper: one chat bubble.
  *
- * AI bubbles carry an agent badge (who produced this text) and a streaming
- * pulse. Model thinking lives in the AI Elements Reasoning fold: it streams
- * open while tokens arrive and auto-collapses ("Thought for N seconds")
- * once the stream ends. */
+ * Sub-agent bubbles carry a badge naming who produced the text; the
+ * supervisor is the conversation's default speaker, so its bubbles stay
+ * unlabeled. Model thinking lives in the AI Elements Reasoning fold: it
+ * streams open while tokens arrive and auto-collapses ("Thought for N
+ * seconds") once the stream ends. */
 export function ChatMessage({ item }: { item: TextItem }) {
   if (item.role === "human") {
     return (
@@ -38,19 +39,21 @@ export function ChatMessage({ item }: { item: TextItem }) {
     : { reasoning: item.reasoning ?? null, content: item.content };
 
   const agent = item.agent ?? "supervisor";
+  const showBadge = agent !== "supervisor";
   return (
     <div className="space-y-1">
-      <div className="flex items-center gap-2">
-        <Badge
-          variant={agent === "supervisor" ? "secondary" : "default"}
-          className="text-xs"
-        >
-          {agent}
-        </Badge>
-        {item.streaming && (
-          <span className="size-2 animate-pulse rounded-full bg-primary" />
-        )}
-      </div>
+      {(showBadge || item.streaming) && (
+        <div className="flex items-center gap-2">
+          {showBadge && (
+            <Badge variant="default" className="text-xs">
+              {agent}
+            </Badge>
+          )}
+          {item.streaming && (
+            <span className="size-2 animate-pulse rounded-full bg-primary" />
+          )}
+        </div>
+      )}
       {view.reasoning && (
         <Reasoning isStreaming={!!item.streaming}>
           <ReasoningTrigger />

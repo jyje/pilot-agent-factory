@@ -19,6 +19,9 @@ export type ToolItem = {
   name: string;
   args: Record<string, unknown>;
   output?: string;
+  /** sub-agent bubbles produced while this delegation ran (deep-mode `task`) —
+   * nested so the transcript stays chronological: card → work inside → result */
+  children?: TextItem[];
 };
 export type NoticeItem = { kind: "notice"; detail: string };
 export type TimelineItem = RouteItem | TextItem | ToolItem | NoticeItem;
@@ -32,6 +35,44 @@ type SseMessage = {
   reasoning?: string | null;
   tool_calls: { name: string; args: Record<string, unknown> }[];
 };
+
+/** Settle a still-streaming bubble: split out reasoning, stop the pulse. */
+function settleText(item: TextItem): TextItem {
+  return item.streaming
+    ? { ...item, ...splitReasoning(item.content), streaming: false }
+    : item;
+}
+
+/** Whether tokens are visibly flowing right now — top-level or nested in a
+ * pending delegation. False mid-turn means the model is working silently
+ * (before the first token, or between agent handovers). */
+function isLive(items: TimelineItem[]): boolean {
+  const last = items[items.length - 1];
+  if (!last) return false;
+  if (last.kind === "text") return !!last.streaming;
+  if (last.kind === "tool" && last.output === undefined) {
+    const child = last.children?.[last.children.length - 1];
+    return !!child?.streaming;
+  }
+  return false;
+}
+
+/** Accumulate a token into the trailing live bubble for `agent`, opening a
+ * new bubble (and settling the previous agent's) on handover. Works on both
+ * the top-level timeline and a tool card's nested children. */
+function appendToken<T extends TimelineItem>(items: T[], agent: string, text: string): T[] {
+  const out = [...items];
+  const last = out[out.length - 1];
+  if (last?.kind === "text" && last.streaming && last.agent === agent) {
+    out[out.length - 1] = { ...last, content: last.content + text };
+  } else {
+    if (last?.kind === "text" && last.streaming) {
+      out[out.length - 1] = settleText(last) as T;
+    }
+    out.push({ kind: "text", role: "ai", agent, content: text, streaming: true } as T);
+  }
+  return out;
+}
 
 /** Parses the backend's SSE stream into a renderable timeline.
  *
@@ -80,26 +121,29 @@ export function useSupervisorChat() {
       setActiveAgent(agent);
       setTimeline((t) => {
         const items = [...t];
-        const last = items[items.length - 1];
-        if (last?.kind === "text" && last.streaming && last.agent === agent) {
-          items[items.length - 1] = { ...last, content: last.content + text };
-        } else {
-          // a different agent took over — settle the previous live bubble
-          // (sub-agent bubbles never get a finalizing top-level message)
-          if (last?.kind === "text" && last.streaming) {
-            items[items.length - 1] = { ...last, ...splitReasoning(last.content), streaming: false };
+        // sub-agent tokens during a pending `task` delegation nest inside that
+        // tool card — the work renders chronologically within the card instead
+        // of below the (earlier) call site
+        if (agent !== "supervisor") {
+          for (let i = items.length - 1; i >= 0; i--) {
+            const item = items[i];
+            if (item.kind === "tool" && item.output === undefined) {
+              items[i] = { ...item, children: appendToken(item.children ?? [], agent, text) };
+              return items;
+            }
           }
-          items.push({ kind: "text", role: "ai", agent, content: text, streaming: true });
         }
-        return items;
+        return appendToken(items, agent, text);
       });
     } else if (event === "done") {
       setTimeline((t) =>
-        t.map((item) =>
-          item.kind === "text" && item.streaming
-            ? { ...item, ...splitReasoning(item.content), streaming: false }
-            : item,
-        ),
+        t.map((item) => {
+          if (item.kind === "text") return settleText(item);
+          if (item.kind === "tool" && item.children) {
+            return { ...item, children: item.children.map(settleText) };
+          }
+          return item;
+        }),
       );
     } else if (event === "route") {
       const { next, reason } = data as { next: string; reason: string };
@@ -109,11 +153,16 @@ export function useSupervisorChat() {
       setTimeline((t) => {
         const items = [...t];
         if (msg.role === "tool") {
-          // attach the result to the last tool call still awaiting output
+          // attach the result to the last tool call still awaiting output and
+          // settle whatever the delegated agent was still streaming inside it
           for (let i = items.length - 1; i >= 0; i--) {
             const item = items[i];
             if (item.kind === "tool" && item.output === undefined) {
-              items[i] = { ...item, output: msg.content };
+              items[i] = {
+                ...item,
+                output: msg.content,
+                children: item.children?.map(settleText),
+              };
               return items;
             }
           }
@@ -217,6 +266,8 @@ export function useSupervisorChat() {
     status,
     error,
     activeAgent,
+    /** mid-turn with no visible tokens — show a shimmer placeholder */
+    thinking: status === "streaming" && !isLive(timeline),
     send,
     stop,
     retry,
